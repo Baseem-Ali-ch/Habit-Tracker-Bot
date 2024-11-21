@@ -1,10 +1,5 @@
-
 const TelegramBot = require('node-telegram-bot-api');
 const sqlite3 = require('sqlite3').verbose();
-
-// Replace with your Telegram bot token from BotFather
-const token = process.env.TOKEN; // Replace with your token
-const bot = new TelegramBot(token, { polling: true });
 
 // Initialize the SQLite database
 const db = new sqlite3.Database('./habit-streaks.db', (err) => {
@@ -12,7 +7,7 @@ const db = new sqlite3.Database('./habit-streaks.db', (err) => {
     else console.log('✅ Connected to database successfully.');
 });
 
-// Create the table if it doesn't exist
+// Create the habits table if it doesn't exist
 db.run(`
     CREATE TABLE IF NOT EXISTS habits (
         user_id INTEGER,
@@ -24,13 +19,26 @@ db.run(`
     )
 `);
 
-// Command to start tracking a new habit
+// Initialize the Telegram bot with webhook mode
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { webHook: true });
+bot.setWebHook(`${process.env.VERCEL_URL}/api`); // Ensure VERCEL_URL is set in environment variables
+
+// Handle the /start command
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, '🌱 Please enter the name of the habit you want to track:');
 });
 
-// Separate function for handling habit addition
+// Listen for text messages after /start command
+bot.on('message', (msg) => {
+    const chatId = msg.chat.id;
+    if (msg.text && !msg.text.startsWith('/')) {
+        const habit = msg.text.toLowerCase().trim();
+        addNewHabit(chatId, habit);
+    }
+});
+
+// Function to add a new habit
 function addNewHabit(chatId, habit) {
     const today = new Date().toISOString().split('T')[0];
     db.run(`
@@ -45,60 +53,6 @@ function addNewHabit(chatId, habit) {
         }
     });
 }
-
-// Listen for text messages after /start command
-bot.on('message', (msg) => {
-    const chatId = msg.chat.id;
-    if (msg.text && !msg.text.startsWith('/')) {
-        const habit = msg.text.toLowerCase().trim();
-        addNewHabit(chatId, habit);
-    }
-});
-
-// Command to update a habit streak
-bot.onText(/\/update/, (msg) => {
-    const chatId = msg.chat.id;
-    db.all(`SELECT habit FROM habits WHERE user_id = ?`, [chatId], (err, rows) => {
-        if (err || rows.length === 0) {
-            bot.sendMessage(chatId, '📋 You have no habits to update.');
-            return;
-        }
-        const habitButtons = rows.map(row => [{ text: `🔹 ${row.habit}`, callback_data: `UPDATE_${row.habit}` }]);
-        bot.sendMessage(chatId, '🏆 Choose a habit to update:', {
-            reply_markup: { inline_keyboard: habitButtons }
-        });
-    });
-});
-
-// Command to view habit streak details
-bot.onText(/\/streak/, (msg) => {
-    const chatId = msg.chat.id;
-    db.all(`SELECT habit FROM habits WHERE user_id = ?`, [chatId], (err, rows) => {
-        if (err || rows.length === 0) {
-            bot.sendMessage(chatId, '📊 You have no habits to check.');
-            return;
-        }
-        const habitButtons = rows.map(row => [{ text: `📈 ${row.habit}`, callback_data: `VIEW_${row.habit}` }]);
-        bot.sendMessage(chatId, '📋 Choose a habit to view streak details:', {
-            reply_markup: { inline_keyboard: habitButtons }
-        });
-    });
-});
-
-// Command to reset a habit streak
-bot.onText(/\/reset/, (msg) => {
-    const chatId = msg.chat.id;
-    db.all(`SELECT habit FROM habits WHERE user_id = ?`, [chatId], (err, rows) => {
-        if (err || rows.length === 0) {
-            bot.sendMessage(chatId, '🚫 You have no habits to reset.');
-            return;
-        }
-        const habitButtons = rows.map(row => [{ text: `🔄 ${row.habit}`, callback_data: `RESET_${row.habit}` }]);
-        bot.sendMessage(chatId, '⚠️ Choose a habit to reset:', {
-            reply_markup: { inline_keyboard: habitButtons }
-        });
-    });
-});
 
 // Centralized callback query handler
 bot.on('callback_query', (callbackQuery) => {
@@ -121,7 +75,7 @@ bot.on('callback_query', (callbackQuery) => {
     bot.answerCallbackQuery(callbackQuery.id);
 });
 
-// Function to update habit streak
+// Functions for habit updates, viewing, and resets
 function updateHabitStreak(chatId, habit) {
     const today = new Date().toISOString().split('T')[0];
     db.get(`SELECT last_updated, streak_count FROM habits WHERE user_id = ? AND habit = ?`, [chatId, habit], (err, row) => {
@@ -143,7 +97,6 @@ function updateHabitStreak(chatId, habit) {
     });
 }
 
-// Function to view habit streak
 function viewHabitStreak(chatId, habit) {
     db.get(`SELECT start_date, last_updated, streak_count FROM habits WHERE user_id = ? AND habit = ?`, [chatId, habit], (err, row) => {
         if (err || !row) {
@@ -154,7 +107,6 @@ function viewHabitStreak(chatId, habit) {
     });
 }
 
-// Function to reset habit
 function resetHabit(chatId, habit) {
     db.run(`DELETE FROM habits WHERE user_id = ? AND habit = ?`, [chatId, habit], (err) => {
         if (err) {
@@ -165,21 +117,8 @@ function resetHabit(chatId, habit) {
     });
 }
 
-
-// Optional: Command to list all tracked habits
-bot.onText(/\/habits/, (msg) => {
-    const chatId = msg.chat.id;
-
-    db.all(`
-        SELECT habit, streak_count FROM habits WHERE user_id = ?
-    `, [chatId], (err, rows) => {
-        if (err || rows.length === 0) {
-            bot.sendMessage(chatId, '📭 No habits being tracked.');
-        } else {
-            const habitsList = rows.map(row => `🌱 ${row.habit}: ${row.streak_count} days`).join('\n');
-            bot.sendMessage(chatId, `📋 *Tracked Habits:*\n${habitsList}`, { parse_mode: 'Markdown' });
-        }
-    });
-});
-
-console.log('🤖 Habit Tracker Bot is running!');
+// Export the webhook handler for Vercel
+module.exports = (req, res) => {
+    bot.processUpdate(req.body); // Process incoming updates
+    res.status(200).send('Bot is running!');
+};
