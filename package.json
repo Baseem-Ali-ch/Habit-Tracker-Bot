@@ -4,10 +4,14 @@
   "main": "script.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node script.js"
+    "start": "node script.js",
+    "build": "echo 'No build step required'"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "",
+  "dependencies": {
+    "node-telegram-bot-api": "^0.59.0" 
+  }
 }
